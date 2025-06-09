@@ -1,0 +1,38 @@
+cmake_minimum_required(VERSION 3.8)
+project({{ cmake.project }})
+
+# Find required packages
+{% for dep in cmake.dependencies %}
+find_package({{ dep }} REQUIRED)
+{% endfor %}
+
+# Set CUDA flags
+set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -arch={{ cmake.cuda_arch }} {{ cmake.cuda_flags }}")
+
+# Add executable
+cuda_add_executable(${PROJECT_NAME}_node
+    {% for source in cmake.sources %}
+    {{ source }}
+    {% endfor %}
+)
+
+# Link libraries
+target_link_libraries(${PROJECT_NAME}_node
+    {% for dep in cmake.dependencies %}
+    ${ {{ dep }}_LIBRARIES }
+    {% endfor %}
+)
+
+# Include directories
+target_include_directories(${PROJECT_NAME}_node PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CUDA_INCLUDE_DIRS}
+    {% for dep in cmake.dependencies %}
+    ${ {{ dep }}_INCLUDE_DIRS }
+    {% endfor %}
+)
+
+# Install targets
+install(TARGETS ${PROJECT_NAME}_node
+    RUNTIME DESTINATION lib/${PROJECT_NAME}
+) 

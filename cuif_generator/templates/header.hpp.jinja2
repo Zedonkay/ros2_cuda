@@ -1,0 +1,51 @@
+#pragma once
+
+{% for include in includes %}
+#include {{ include }}
+{% endfor %}
+
+namespace {{ namespace.split('::')[0] }} {
+namespace {{ namespace.split('::')[1] }} {
+
+{% if class.doc %}
+/**
+ * @brief {{ class.doc }}
+ */
+{% endif %}
+class {{ class.name }}{% if class.base %} : public {{ class.base }}{% endif %} {
+public:
+    {% if class.factory %}
+    /**
+     * @brief {{ class.methods[0].doc }}
+     */
+    static std::shared_ptr<{{ class.name }}> create({{ class.methods[0].params }});
+    {% endif %}
+
+    {% for member in class.members %}
+    {% if member.public %}
+    {% if member.doc %}
+    /// {{ member.doc }}
+    {% endif %}
+    {{ member.type }} {{ member.name }}{% if member.init %} = {{ member.init }}{% endif %};
+    {% endif %}
+    {% endfor %}
+
+    {% for method in class.methods %}
+    {% if method.doc %}
+    /**
+     * @brief {{ method.doc }}
+     */
+    {% endif %}
+    {% if method.virtual %}virtual {% endif %}{{ method.return }} {{ method.name }}({{ method.params }}){% if method.virtual %} = 0{% endif %};
+    {% endfor %}
+
+    virtual ~{{ class.name }}() = default;
+
+{% if class.base %}
+protected:
+    {{ class.name }}({{ class.methods[0].params.split('=')[0].strip() }});
+{% endif %}
+};
+
+} // namespace {{ namespace.split('::')[1] }}
+} // namespace {{ namespace.split('::')[0] }} 
