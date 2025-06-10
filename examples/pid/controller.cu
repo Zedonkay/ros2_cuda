@@ -1,0 +1,158 @@
+// This file is auto-generated from a .cuif specification
+// Class: PIDControllerNode
+// Method: compute_control
+
+// CUDA implementation of parallel PID controller
+#include <cuda_runtime.h>
+#include <thrust/device_vector.h>
+#include <thrust/execution_policy.h>
+#include <thrust/transform.h>
+#include <thrust/functional.h>
+#include <thrust/iterator/zip_iterator.h>
+#include <vector>
+#include <cmath>
+
+// Constants
+constexpr int NUM_JOINTS = 6;  // Number of joints to control
+constexpr float DT = 0.01f;  // Control period
+constexpr float MAX_INTEGRAL = 100.0f;  // Maximum integral value
+constexpr float MIN_INTEGRAL = -100.0f;  // Minimum integral value
+
+// Data structures
+struct JointState {
+    float position;
+    float velocity;
+    float integral;
+};
+
+struct PIDGains {
+    float kp;  // Proportional gain
+    float ki;  // Integral gain
+    float kd;  // Derivative gain
+};
+
+struct Control {
+    float effort;
+};
+
+// Device functions for core computations
+__device__ float compute_error(float current, float target) {
+    return target - current;
+}
+
+__device__ float compute_derivative(float current_vel, float target_vel) {
+    return target_vel - current_vel;
+}
+
+__device__ float update_integral(float integral, float error, float dt) {
+    float new_integral = integral + error * dt;
+    return fmaxf(fminf(new_integral, MAX_INTEGRAL), MIN_INTEGRAL);
+}
+
+__device__ float compute_pid_control(const JointState& state, const PIDGains& gains, float target_pos, float target_vel) {
+    // Compute error terms
+    float error = compute_error(state.position, target_pos);
+    float derivative = compute_derivative(state.velocity, target_vel);
+    
+    // Compute control effort
+    float effort = gains.kp * error + 
+                  gains.ki * state.integral + 
+                  gains.kd * derivative;
+    
+    return effort;
+}
+
+// Device function for joint state update
+__device__ void update_joint_state(JointState& state, float error, float dt) {
+    state.integral = update_integral(state.integral, error, dt);
+}
+
+// Kernel for parallel PID control computation
+__global__ void compute_pid_control_kernel(
+    const JointState* current_states,
+    const PIDGains* gains,
+    const float* target_positions,
+    const float* target_velocities,
+    Control* controls
+) {
+    int joint_idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (joint_idx >= NUM_JOINTS) return;
+    
+    // Get current state and gains
+    JointState state = current_states[joint_idx];
+    PIDGains joint_gains = gains[joint_idx];
+    
+    // Compute control effort
+    float effort = compute_pid_control(
+        state,
+        joint_gains,
+        target_positions[joint_idx],
+        target_velocities[joint_idx]
+    );
+    
+    // Update integral
+    float error = compute_error(state.position, target_positions[joint_idx]);
+    update_joint_state(state, error, DT);
+    
+    // Store control effort
+    controls[joint_idx].effort = effort;
+}
+
+// Kernel for parallel integral update
+__global__ void update_integrals_kernel(
+    JointState* states,
+    const float* current_positions,
+    const float* target_positions
+) {
+    int joint_idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (joint_idx >= NUM_JOINTS) return;
+    
+    // Compute error and update integral
+    float error = compute_error(current_positions[joint_idx], target_positions[joint_idx]);
+    update_joint_state(states[joint_idx], error, DT);
+}
+
+// ROS2-exposed method
+void compute_control(
+    const float* current_positions,
+    const float* current_velocities,
+    const float* target_positions,
+    const float* target_velocities,
+    const PIDGains* gains,
+    Control* controls
+) {
+    // Allocate device memory
+    thrust::device_vector<JointState> d_states(NUM_JOINTS);
+    thrust::device_vector<PIDGains> d_gains(NUM_JOINTS);
+    thrust::device_vector<float> d_current_positions(current_positions, current_positions + NUM_JOINTS);
+    thrust::device_vector<float> d_current_velocities(current_velocities, current_velocities + NUM_JOINTS);
+    thrust::device_vector<float> d_target_positions(target_positions, target_positions + NUM_JOINTS);
+    thrust::device_vector<float> d_target_velocities(target_velocities, target_velocities + NUM_JOINTS);
+    thrust::device_vector<Control> d_controls(NUM_JOINTS);
+    
+    // Copy gains to device
+    thrust::copy(gains, gains + NUM_JOINTS, d_gains.begin());
+    
+    // Launch kernel for parallel PID control computation
+    int block_size = 256;
+    int num_blocks = (NUM_JOINTS + block_size - 1) / block_size;
+    compute_pid_control_kernel<<<num_blocks, block_size>>>(
+        thrust::raw_pointer_cast(d_states.data()),
+        thrust::raw_pointer_cast(d_gains.data()),
+        thrust::raw_pointer_cast(d_current_positions.data()),
+        thrust::raw_pointer_cast(d_current_velocities.data()),
+        thrust::raw_pointer_cast(d_target_positions.data()),
+        thrust::raw_pointer_cast(d_target_velocities.data()),
+        thrust::raw_pointer_cast(d_controls.data())
+    );
+    
+    // Launch kernel for parallel integral update
+    update_integrals_kernel<<<num_blocks, block_size>>>(
+        thrust::raw_pointer_cast(d_states.data()),
+        thrust::raw_pointer_cast(d_current_positions.data()),
+        thrust::raw_pointer_cast(d_target_positions.data())
+    );
+    
+    // Copy controls back to host
+    thrust::copy(d_controls.begin(), d_controls.end(), controls);
+} 

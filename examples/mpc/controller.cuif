@@ -1,0 +1,223 @@
+class: MPCControllerNode
+method: compute_control
+includes:
+  - <cuda_runtime.h>
+  - <thrust/device_vector.h>
+  - <thrust/execution_policy.h>
+  - <thrust/transform.h>
+  - <thrust/functional.h>
+  - <thrust/iterator/zip_iterator.h>
+  - <vector>
+  - <cmath>
+
+---
+// CUDA implementation of MPC controller
+#include <cuda_runtime.h>
+#include <thrust/device_vector.h>
+#include <thrust/execution_policy.h>
+#include <thrust/transform.h>
+#include <thrust/functional.h>
+#include <thrust/iterator/zip_iterator.h>
+#include <vector>
+#include <cmath>
+
+// Constants
+constexpr int STATE_DIM = 12;  // 12-dimensional state vector
+constexpr int CONTROL_DIM = 6;  // 6-dimensional control vector
+constexpr int HORIZON = 50;  // Prediction horizon
+constexpr float DT = 0.01f;  // Time step
+constexpr int MAX_ITERATIONS = 100;  // Maximum optimization iterations
+constexpr float LEARNING_RATE = 0.01f;  // Gradient descent learning rate
+
+// Data structures
+struct State {
+    float position[3];
+    float velocity[3];
+    float orientation[3];
+    float angular_velocity[3];
+};
+
+struct Control {
+    float force[3];
+    float torque[3];
+};
+
+struct MPCParams {
+    float state_cost_weights[STATE_DIM];  // State cost weights
+    float control_cost_weights[CONTROL_DIM];  // Control cost weights
+    float max_force;  // Maximum force
+    float max_torque;  // Maximum torque
+    float max_rate;  // Maximum control rate
+};
+
+// Device functions for core computations
+__device__ void compute_dynamics(State& next_state, const State& current_state, const Control& control) {
+    // Position update
+    for (int i = 0; i < 3; i++) {
+        next_state.position[i] = current_state.position[i] + current_state.velocity[i] * DT;
+        next_state.velocity[i] = current_state.velocity[i] + control.force[i] * DT;
+    }
+    
+    // Orientation update (simplified)
+    for (int i = 0; i < 3; i++) {
+        next_state.orientation[i] = current_state.orientation[i] + current_state.angular_velocity[i] * DT;
+        next_state.angular_velocity[i] = current_state.angular_velocity[i] + control.torque[i] * DT;
+    }
+}
+
+__device__ float compute_state_cost(const State& state, const State& target_state, const float* weights) {
+    float cost = 0.0f;
+    
+    // Position cost
+    for (int i = 0; i < 3; i++) {
+        float pos_diff = state.position[i] - target_state.position[i];
+        cost += weights[i] * pos_diff * pos_diff;
+    }
+    
+    // Velocity cost
+    for (int i = 0; i < 3; i++) {
+        cost += weights[i + 3] * state.velocity[i] * state.velocity[i];
+    }
+    
+    // Orientation cost
+    for (int i = 0; i < 3; i++) {
+        float ori_diff = state.orientation[i] - target_state.orientation[i];
+        cost += weights[i + 6] * ori_diff * ori_diff;
+    }
+    
+    // Angular velocity cost
+    for (int i = 0; i < 3; i++) {
+        cost += weights[i + 9] * state.angular_velocity[i] * state.angular_velocity[i];
+    }
+    
+    return cost;
+}
+
+__device__ float compute_control_cost(const Control& control, const float* weights) {
+    float cost = 0.0f;
+    
+    // Force cost
+    for (int i = 0; i < 3; i++) {
+        cost += weights[i] * control.force[i] * control.force[i];
+    }
+    
+    // Torque cost
+    for (int i = 0; i < 3; i++) {
+        cost += weights[i + 3] * control.torque[i] * control.torque[i];
+    }
+    
+    return cost;
+}
+
+__device__ void saturate_control(Control& control, float max_force, float max_torque) {
+    for (int i = 0; i < 3; i++) {
+        control.force[i] = fmaxf(fminf(control.force[i], max_force), -max_force);
+        control.torque[i] = fmaxf(fminf(control.torque[i], max_torque), -max_torque);
+    }
+}
+
+__device__ void limit_control_rate(Control& control, const Control& prev_control, float max_rate) {
+    for (int i = 0; i < 3; i++) {
+        float force_rate = (control.force[i] - prev_control.force[i]) / DT;
+        float torque_rate = (control.torque[i] - prev_control.torque[i]) / DT;
+        
+        if (fabsf(force_rate) > max_rate) {
+            control.force[i] = prev_control.force[i] + copysignf(max_rate * DT, force_rate);
+        }
+        
+        if (fabsf(torque_rate) > max_rate) {
+            control.torque[i] = prev_control.torque[i] + copysignf(max_rate * DT, torque_rate);
+        }
+    }
+}
+
+// Device function for forward pass
+__device__ void forward_pass(State* states, const Control* controls, const State& initial_state, int horizon) {
+    states[0] = initial_state;
+    
+    for (int t = 0; t < horizon; t++) {
+        compute_dynamics(states[t + 1], states[t], controls[t]);
+    }
+}
+
+// Device function for backward pass
+__device__ void backward_pass(Control* controls, const State* states, const State& target_state,
+                            const MPCParams& params, float learning_rate) {
+    for (int t = HORIZON - 1; t >= 0; t--) {
+        // Compute state gradient
+        float state_grad[STATE_DIM];
+        for (int i = 0; i < STATE_DIM; i++) {
+            state_grad[i] = 2.0f * params.state_cost_weights[i] * 
+                           (states[t + 1].position[i % 3] - target_state.position[i % 3]);
+        }
+        
+        // Compute control gradient
+        float control_grad[CONTROL_DIM];
+        for (int i = 0; i < CONTROL_DIM; i++) {
+            control_grad[i] = 2.0f * params.control_cost_weights[i] * 
+                            (i < 3 ? controls[t].force[i] : controls[t].torque[i - 3]);
+        }
+        
+        // Update control
+        for (int i = 0; i < 3; i++) {
+            controls[t].force[i] -= learning_rate * control_grad[i];
+            controls[t].torque[i] -= learning_rate * control_grad[i + 3];
+        }
+        
+        // Apply constraints
+        saturate_control(controls[t], params.max_force, params.max_torque);
+        if (t > 0) {
+            limit_control_rate(controls[t], controls[t - 1], params.max_rate);
+        }
+    }
+}
+
+// Kernel for solving MPC problem
+__global__ void solve_mpc(
+    const State initial_state,
+    const State target_state,
+    const MPCParams params,
+    Control* controls
+) {
+    // Allocate memory for states
+    State states[HORIZON + 1];
+    
+    // Initialize controls
+    for (int t = 0; t < HORIZON; t++) {
+        for (int i = 0; i < 3; i++) {
+            controls[t].force[i] = 0.0f;
+            controls[t].torque[i] = 0.0f;
+        }
+    }
+    
+    // Optimization loop
+    for (int iter = 0; iter < MAX_ITERATIONS; iter++) {
+        // Forward pass
+        forward_pass(states, controls, initial_state, HORIZON);
+        
+        // Backward pass
+        backward_pass(controls, states, target_state, params, LEARNING_RATE);
+    }
+}
+
+// ROS2-exposed method
+void compute_control(
+    const State& current_state,
+    const State& target_state,
+    const MPCParams& params,
+    Control& control
+) {
+    // Allocate device memory
+    thrust::device_vector<Control> d_controls(HORIZON);
+    
+    // Launch kernel for solving MPC problem
+    solve_mpc<<<1, 1>>>(
+        current_state,
+        target_state,
+        params,
+        thrust::raw_pointer_cast(d_controls.data())
+    );
+    
+    // Copy first control to output
+    control = d_controls[0];
+} 

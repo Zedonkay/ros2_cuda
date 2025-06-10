@@ -2,4 +2,51 @@
 // Class: {{ class_name }}
 // Method: {{ method_name }}
 
+#include "{{ class_name }}.cuh"
+
+{% if device_functions %}
+// Device function implementations
+{% for func in device_functions %}
+__device__ {{ func.return_type }} {{ func.name }}({% for param in func.params %}{{ param.type }} {{ param.name }}{% if not loop.last %}, {% endif %}{% endfor %}) {
+    // TODO: Implement device function
+}
+{% endfor %}
+{% endif %}
+
+{% if global_functions %}
+// CUDA kernel implementations
+{% for func in global_functions %}
+__global__ {{ func.return_type }} {{ func.name }}({% for param in func.params %}{{ param.type }} {{ param.name }}{% if not loop.last %}, {% endif %}{% endfor %}) {
+    // TODO: Implement kernel
+}
+{% endfor %}
+{% endif %}
+
+{% if methods %}
+// ROS method implementations
+{% for method in methods %}
+{{ method.return_type }} {{ class_name }}_Impl::{{ method.name }}({% for param in method.params %}{{ param.type }} {{ param.name }}{% if not loop.last %}, {% endif %}{% endfor %}) {
+    // TODO: Implement ROS method using CUDA
+}
+{% endfor %}
+{% endif %}
+
+{% if device_functions %}
+// Device function overrides
+{% for func in device_functions %}
+{{ func.return_type }} {{ class_name }}_Impl::{{ func.name }}({% for param in func.params %}{{ param.type }} {{ param.name }}{% if not loop.last %}, {% endif %}{% endfor %}) {
+    // TODO: Call __device__ {{ func.name }} (host wrapper or kernel launch)
+}
+{% endfor %}
+{% endif %}
+
+{% if global_functions %}
+// Kernel function overrides
+{% for func in global_functions %}
+{{ func.return_type }} {{ class_name }}_Impl::{{ func.name }}({% for param in func.params %}{{ param.type }} {{ param.name }}{% if not loop.last %}, {% endif %}{% endfor %}) {
+    // TODO: Launch __global__ {{ func.name }} kernel
+}
+{% endfor %}
+{% endif %}
+
 {{ verbatim_code }} 

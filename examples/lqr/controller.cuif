@@ -1,0 +1,183 @@
+class: LQRControllerNode
+method: compute_control
+includes:
+  - <cuda_runtime.h>
+  - <thrust/device_vector.h>
+  - <thrust/execution_policy.h>
+  - <thrust/transform.h>
+  - <thrust/functional.h>
+  - <thrust/iterator/zip_iterator.h>
+  - <vector>
+  - <cmath>
+
+---
+// CUDA implementation of LQR controller
+#include <cuda_runtime.h>
+#include <thrust/device_vector.h>
+#include <thrust/execution_policy.h>
+#include <thrust/transform.h>
+#include <thrust/functional.h>
+#include <thrust/iterator/zip_iterator.h>
+#include <vector>
+#include <cmath>
+
+// Constants
+constexpr int STATE_DIM = 12;  // 12-dimensional state vector
+constexpr int CONTROL_DIM = 6;  // 6-dimensional control vector
+constexpr int NUM_CONTROLLERS = 1;  // Number of parallel controllers
+
+// Data structures
+struct State {
+    float position[3];
+    float velocity[3];
+    float orientation[3];
+    float angular_velocity[3];
+};
+
+struct Control {
+    float force[3];
+    float torque[3];
+};
+
+struct LQRGains {
+    float K[STATE_DIM * CONTROL_DIM];  // Feedback gain matrix
+};
+
+// Device functions for core computations
+__device__ void compute_state_error(const State& current, const State& target, float* error) {
+    // Position error
+    for (int i = 0; i < 3; i++) {
+        error[i] = target.position[i] - current.position[i];
+    }
+    
+    // Velocity error
+    for (int i = 0; i < 3; i++) {
+        error[i + 3] = target.velocity[i] - current.velocity[i];
+    }
+    
+    // Orientation error
+    for (int i = 0; i < 3; i++) {
+        error[i + 6] = target.orientation[i] - current.orientation[i];
+    }
+    
+    // Angular velocity error
+    for (int i = 0; i < 3; i++) {
+        error[i + 9] = target.angular_velocity[i] - current.angular_velocity[i];
+    }
+}
+
+__device__ void matrix_vector_multiply(const float* matrix, const float* vector, float* result, int rows, int cols) {
+    for (int i = 0; i < rows; i++) {
+        result[i] = 0.0f;
+        for (int j = 0; j < cols; j++) {
+            result[i] += matrix[i * cols + j] * vector[j];
+        }
+    }
+}
+
+__device__ void compute_lqr_control(const float* K, const float* error, Control& control) {
+    float u[CONTROL_DIM];
+    matrix_vector_multiply(K, error, u, CONTROL_DIM, STATE_DIM);
+    
+    // Split control into force and torque
+    for (int i = 0; i < 3; i++) {
+        control.force[i] = u[i];
+        control.torque[i] = u[i + 3];
+    }
+}
+
+// Device function for control saturation
+__device__ void saturate_control(Control& control, float max_force, float max_torque) {
+    for (int i = 0; i < 3; i++) {
+        control.force[i] = fmaxf(fminf(control.force[i], max_force), -max_force);
+        control.torque[i] = fmaxf(fminf(control.torque[i], max_torque), -max_torque);
+    }
+}
+
+// Device function for control rate limiting
+__device__ void limit_control_rate(Control& control, const Control& prev_control, float max_rate) {
+    for (int i = 0; i < 3; i++) {
+        float force_rate = (control.force[i] - prev_control.force[i]) / DT;
+        float torque_rate = (control.torque[i] - prev_control.torque[i]) / DT;
+        
+        if (fabsf(force_rate) > max_rate) {
+            control.force[i] = prev_control.force[i] + copysignf(max_rate * DT, force_rate);
+        }
+        
+        if (fabsf(torque_rate) > max_rate) {
+            control.torque[i] = prev_control.torque[i] + copysignf(max_rate * DT, torque_rate);
+        }
+    }
+}
+
+// Kernel for parallel LQR control computation
+__global__ void compute_lqr_control_kernel(
+    const State* current_states,
+    const State* target_states,
+    const LQRGains* gains,
+    const Control* prev_controls,
+    Control* controls,
+    float max_force,
+    float max_torque,
+    float max_rate
+) {
+    int controller_idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (controller_idx >= NUM_CONTROLLERS) return;
+    
+    // Get current state and target
+    const State& current = current_states[controller_idx];
+    const State& target = target_states[controller_idx];
+    const LQRGains& controller_gains = gains[controller_idx];
+    const Control& prev_control = prev_controls[controller_idx];
+    
+    // Compute state error
+    float error[STATE_DIM];
+    compute_state_error(current, target, error);
+    
+    // Compute LQR control
+    Control control;
+    compute_lqr_control(controller_gains.K, error, control);
+    
+    // Apply control constraints
+    saturate_control(control, max_force, max_torque);
+    limit_control_rate(control, prev_control, max_rate);
+    
+    // Store control
+    controls[controller_idx] = control;
+}
+
+// ROS2-exposed method
+void compute_control(
+    const State* current_states,
+    const State* target_states,
+    const LQRGains* gains,
+    const Control* prev_controls,
+    Control* controls,
+    float max_force = 100.0f,
+    float max_torque = 50.0f,
+    float max_rate = 10.0f
+) {
+    // Allocate device memory
+    thrust::device_vector<State> d_current_states(current_states, current_states + NUM_CONTROLLERS);
+    thrust::device_vector<State> d_target_states(target_states, target_states + NUM_CONTROLLERS);
+    thrust::device_vector<LQRGains> d_gains(gains, gains + NUM_CONTROLLERS);
+    thrust::device_vector<Control> d_prev_controls(prev_controls, prev_controls + NUM_CONTROLLERS);
+    thrust::device_vector<Control> d_controls(NUM_CONTROLLERS);
+    
+    // Launch kernel for parallel LQR control computation
+    int block_size = 256;
+    int num_blocks = (NUM_CONTROLLERS + block_size - 1) / block_size;
+    compute_lqr_control_kernel<<<num_blocks, block_size>>>(
+        thrust::raw_pointer_cast(d_current_states.data()),
+        thrust::raw_pointer_cast(d_target_states.data()),
+        thrust::raw_pointer_cast(d_gains.data()),
+        thrust::raw_pointer_cast(d_prev_controls.data()),
+        thrust::raw_pointer_cast(d_controls.data()),
+        max_force,
+        max_torque,
+        max_rate
+    );
+    
+    // Copy controls back to host
+    thrust::copy(d_controls.begin(), d_controls.end(), controls);
+} 

@@ -1,8 +1,63 @@
 #pragma once
 
+#include <cuda_runtime.h>
 #include "{{ class_name }}.hpp"
+
+{% if cuda_constants %}
+// CUDA-specific constants
+{% for const in cuda_constants %}
+__constant__ {{ const.type }} {{ const.name }} = {{ const.value }};
+{% endfor %}
+{% endif %}
+
+{% if cuda_structs %}
+// CUDA-specific data structures
+{% for struct in cuda_structs %}
+struct {{ struct.name }} {
+    {% for member in struct.members %}
+    {{ member.type }} {{ member.name }};
+    {% endfor %}
+};
+{% endfor %}
+{% endif %}
+
+{% if device_functions %}
+// Device function declarations
+{% for func in device_functions %}
+__device__ {{ func.return_type }} {{ func.name }}({% for param in func.params %}{{ param.type }} {{ param.name }}{% if not loop.last %}, {% endif %}{% endfor %});
+{% endfor %}
+{% endif %}
+
+{% if global_functions %}
+// CUDA kernel declarations
+{% for func in global_functions %}
+__global__ {{ func.return_type }} {{ func.name }}({% for param in func.params %}{{ param.type }} {{ param.name }}{% if not loop.last %}, {% endif %}{% endfor %});
+{% endfor %}
+{% endif %}
 
 class {{ class_name }}_Impl : public {{ class_name }} {
 public:
-    void {{ method_name }}(int* device_data, int n) override;
+    {{ class_name }}_Impl() = default;
+    ~{{ class_name }}_Impl() override = default;
+
+    {% if methods %}
+    // CUDA implementation of ROS methods
+    {% for method in methods %}
+    {{ method.return_type }} {{ method.name }}({% for param in method.params %}{{ param.type }} {{ param.name }}{% if not loop.last %}, {% endif %}{% endfor %}) override;
+    {% endfor %}
+    {% endif %}
+
+    {% if device_functions %}
+    // Device function overrides
+    {% for func in device_functions %}
+    {{ func.return_type }} {{ func.name }}({% for param in func.params %}{{ param.type }} {{ param.name }}{% if not loop.last %}, {% endif %}{% endfor %}) override;
+    {% endfor %}
+    {% endif %}
+
+    {% if global_functions %}
+    // Kernel function overrides
+    {% for func in global_functions %}
+    {{ func.return_type }} {{ func.name }}({% for param in func.params %}{{ param.type }} {{ param.name }}{% if not loop.last %}, {% endif %}{% endfor %}) override;
+    {% endfor %}
+    {% endif %}
 }; 

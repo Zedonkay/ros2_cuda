@@ -1,0 +1,23 @@
+cmake_minimum_required(VERSION 3.8)
+project(robot_control)
+
+find_package(CUDA REQUIRED)
+
+set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -arch=sm_75 -O2 -rdc=true")
+
+cuda_add_executable(${PROJECT_NAME}_node
+    robot_control.cu
+)
+
+target_link_libraries(${PROJECT_NAME}_node
+    ${CUDA_LIBRARIES}
+)
+
+target_include_directories(${PROJECT_NAME}_node PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CUDA_INCLUDE_DIRS}
+)
+
+install(TARGETS ${PROJECT_NAME}_node
+    RUNTIME DESTINATION lib/${PROJECT_NAME}
+) 

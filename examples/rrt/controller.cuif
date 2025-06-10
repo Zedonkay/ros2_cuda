@@ -1,0 +1,266 @@
+class: RRTPlannerNode
+method: plan_trajectory
+includes:
+  - <cuda_runtime.h>
+  - <thrust/device_vector.h>
+  - <thrust/execution_policy.h>
+  - <thrust/random.h>
+  - <thrust/transform.h>
+  - <thrust/functional.h>
+  - <thrust/iterator/zip_iterator.h>
+  - <vector>
+  - <cmath>
+
+---
+#include <cuda_runtime.h>
+#include <thrust/device_vector.h>
+#include <thrust/execution_policy.h>
+#include <thrust/random.h>
+#include <thrust/transform.h>
+#include <thrust/functional.h>
+#include <thrust/iterator/zip_iterator.h>
+#include <vector>
+#include <cmath>
+
+// Constants
+constexpr int STATE_DIM = 12;  // 12-dimensional state vector
+constexpr int MAX_NODES = 1000;  // Maximum number of nodes in tree
+constexpr float GOAL_BIAS = 0.1f;  // Probability of sampling goal state
+constexpr float STEP_SIZE = 0.1f;  // Maximum step size
+constexpr float GOAL_THRESHOLD = 0.1f;  // Distance threshold for goal
+
+// Data structures
+struct State {
+    float position[3];
+    float velocity[3];
+    float orientation[3];
+    float angular_velocity[3];
+};
+
+struct Node {
+    State state;
+    int parent;
+    float cost;
+};
+
+struct Trajectory {
+    State states[MAX_NODES];
+    int num_states;
+};
+
+// Device functions for core computations
+__device__ float compute_distance(const State& a, const State& b) {
+    float dist = 0.0f;
+    
+    // Position distance
+    for (int i = 0; i < 3; i++) {
+        float pos_diff = a.position[i] - b.position[i];
+        dist += pos_diff * pos_diff;
+    }
+    
+    // Orientation distance
+    for (int i = 0; i < 3; i++) {
+        float ori_diff = a.orientation[i] - b.orientation[i];
+        dist += ori_diff * ori_diff;
+    }
+    
+    return sqrtf(dist);
+}
+
+__device__ bool is_valid_state(const State& state) {
+    // Check position bounds
+    for (int i = 0; i < 3; i++) {
+        if (fabsf(state.position[i]) > 10.0f) return false;
+    }
+    
+    // Check velocity bounds
+    for (int i = 0; i < 3; i++) {
+        if (fabsf(state.velocity[i]) > 5.0f) return false;
+    }
+    
+    // Check orientation bounds
+    for (int i = 0; i < 3; i++) {
+        if (fabsf(state.orientation[i]) > M_PI) return false;
+    }
+    
+    // Check angular velocity bounds
+    for (int i = 0; i < 3; i++) {
+        if (fabsf(state.angular_velocity[i]) > 2.0f) return false;
+    }
+    
+    return true;
+}
+
+__device__ int find_nearest_node(const Node* nodes, int num_nodes, const State& state) {
+    int nearest_idx = 0;
+    float min_dist = FLT_MAX;
+    
+    for (int i = 0; i < num_nodes; i++) {
+        float dist = compute_distance(nodes[i].state, state);
+        if (dist < min_dist) {
+            min_dist = dist;
+            nearest_idx = i;
+        }
+    }
+    
+    return nearest_idx;
+}
+
+__device__ void sample_random_state(State& state, thrust::default_random_engine& rng) {
+    thrust::uniform_real_distribution<float> pos_dist(-10.0f, 10.0f);
+    thrust::uniform_real_distribution<float> vel_dist(-5.0f, 5.0f);
+    thrust::uniform_real_distribution<float> ori_dist(-M_PI, M_PI);
+    thrust::uniform_real_distribution<float> ang_vel_dist(-2.0f, 2.0f);
+    
+    for (int i = 0; i < 3; i++) {
+        state.position[i] = pos_dist(rng);
+        state.velocity[i] = vel_dist(rng);
+        state.orientation[i] = ori_dist(rng);
+        state.angular_velocity[i] = ang_vel_dist(rng);
+    }
+}
+
+__device__ void sample_biased_state(State& state, const State& goal_state, thrust::default_random_engine& rng) {
+    thrust::uniform_real_distribution<float> bias_dist(0.0f, 1.0f);
+    
+    if (bias_dist(rng) < GOAL_BIAS) {
+        // Sample goal state
+        state = goal_state;
+    } else {
+        // Sample random state
+        sample_random_state(state, rng);
+    }
+}
+
+__device__ void steer(const State& start, const State& goal, State& result) {
+    float dist = compute_distance(start, goal);
+    
+    if (dist <= STEP_SIZE) {
+        result = goal;
+    } else {
+        float scale = STEP_SIZE / dist;
+        
+        for (int i = 0; i < 3; i++) {
+            result.position[i] = start.position[i] + scale * (goal.position[i] - start.position[i]);
+            result.velocity[i] = start.velocity[i] + scale * (goal.velocity[i] - start.velocity[i]);
+            result.orientation[i] = start.orientation[i] + scale * (goal.orientation[i] - start.orientation[i]);
+            result.angular_velocity[i] = start.angular_velocity[i] + scale * (goal.angular_velocity[i] - start.angular_velocity[i]);
+        }
+    }
+}
+
+__device__ bool is_goal_reached(const State& state, const State& goal) {
+    return compute_distance(state, goal) < GOAL_THRESHOLD;
+}
+
+// Device function for trajectory extraction
+__device__ void extract_trajectory(const Node* nodes, int goal_idx, Trajectory& trajectory) {
+    int current_idx = goal_idx;
+    int num_states = 0;
+    
+    // Extract states in reverse order
+    while (current_idx != -1) {
+        trajectory.states[num_states++] = nodes[current_idx].state;
+        current_idx = nodes[current_idx].parent;
+    }
+    
+    // Reverse the trajectory
+    for (int i = 0; i < num_states / 2; i++) {
+        State temp = trajectory.states[i];
+        trajectory.states[i] = trajectory.states[num_states - 1 - i];
+        trajectory.states[num_states - 1 - i] = temp;
+    }
+    
+    trajectory.num_states = num_states;
+}
+
+// Kernel for building RRT
+__global__ void build_rrt(
+    const State start_state,
+    const State goal_state,
+    Node* nodes,
+    int* num_nodes,
+    int* goal_idx
+) {
+    // Initialize tree with start state
+    nodes[0].state = start_state;
+    nodes[0].parent = -1;
+    nodes[0].cost = 0.0f;
+    *num_nodes = 1;
+    *goal_idx = -1;
+    
+    // Initialize random number generator
+    thrust::default_random_engine rng;
+    rng.discard(blockIdx.x * MAX_NODES);
+    
+    // Build tree
+    while (*num_nodes < MAX_NODES) {
+        // Sample random state
+        State random_state;
+        sample_biased_state(random_state, goal_state, rng);
+        
+        // Find nearest node
+        int nearest_idx = find_nearest_node(nodes, *num_nodes, random_state);
+        
+        // Steer towards random state
+        State new_state;
+        steer(nodes[nearest_idx].state, random_state, new_state);
+        
+        // Check if new state is valid
+        if (is_valid_state(new_state)) {
+            // Add new node
+            nodes[*num_nodes].state = new_state;
+            nodes[*num_nodes].parent = nearest_idx;
+            nodes[*num_nodes].cost = nodes[nearest_idx].cost + 
+                                    compute_distance(nodes[nearest_idx].state, new_state);
+            (*num_nodes)++;
+            
+            // Check if goal is reached
+            if (is_goal_reached(new_state, goal_state)) {
+                *goal_idx = *num_nodes - 1;
+                break;
+            }
+        }
+    }
+}
+
+// Kernel for trajectory extraction
+__global__ void extract_trajectory_kernel(
+    const Node* nodes,
+    int goal_idx,
+    Trajectory* trajectory
+) {
+    extract_trajectory(nodes, goal_idx, *trajectory);
+}
+
+// ROS2-exposed method
+void plan_trajectory(
+    const State& start_state,
+    const State& goal_state,
+    Trajectory& trajectory
+) {
+    // Allocate device memory
+    thrust::device_vector<Node> d_nodes(MAX_NODES);
+    thrust::device_vector<int> d_num_nodes(1);
+    thrust::device_vector<int> d_goal_idx(1);
+    thrust::device_vector<Trajectory> d_trajectory(1);
+    
+    // Launch kernel for building RRT
+    build_rrt<<<1, 1>>>(
+        start_state,
+        goal_state,
+        thrust::raw_pointer_cast(d_nodes.data()),
+        thrust::raw_pointer_cast(d_num_nodes.data()),
+        thrust::raw_pointer_cast(d_goal_idx.data())
+    );
+    
+    // Launch kernel for trajectory extraction
+    extract_trajectory_kernel<<<1, 1>>>(
+        thrust::raw_pointer_cast(d_nodes.data()),
+        d_goal_idx[0],
+        thrust::raw_pointer_cast(d_trajectory.data())
+    );
+    
+    // Copy trajectory back to host
+    trajectory = d_trajectory[0];
+} 

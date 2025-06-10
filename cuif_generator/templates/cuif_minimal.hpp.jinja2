@@ -1,6 +1,53 @@
 #pragma once
 
+#include <cuda_runtime.h>
+#include <thrust/device_vector.h>
+#include <thrust/execution_policy.h>
+#include <thrust/random.h>
+#include <vector>
+#include <cmath>
+#include <random>
+
+{% if constants %}
+// Constants
+{% for const in constants %}
+constexpr {{ const.type }} {{ const.name }} = {{ const.value }};
+{% endfor %}
+{% endif %}
+
+{% if structs %}
+// Data Structures
+{% for struct in structs %}
+struct {{ struct.name }} {
+    {% for member in struct.members %}
+    {{ member.type }} {{ member.name }};
+    {% endfor %}
+};
+{% endfor %}
+{% endif %}
+
 class {{ class_name }} {
 public:
-    void {{ method_name }}(int* device_data, int n);
+    virtual ~{{ class_name }}() = default;
+    
+    // ROS-compatible method declarations
+    {% if methods %}
+    {% for method in methods %}
+    virtual {{ method.return_type }} {{ method.name }}({% for param in method.params %}{{ param.type }} {{ param.name }}{% if not loop.last %}, {% endif %}{% endfor %}) = 0;
+    {% endfor %}
+    {% endif %}
+    
+    // Device functions as abstract interface
+    {% if device_functions %}
+    {% for func in device_functions %}
+    virtual {{ func.return_type }} {{ func.name }}({% for param in func.params %}{{ param.type }} {{ param.name }}{% if not loop.last %}, {% endif %}{% endfor %}) = 0;
+    {% endfor %}
+    {% endif %}
+    
+    // Global (kernel) functions as abstract interface
+    {% if global_functions %}
+    {% for func in global_functions %}
+    virtual {{ func.return_type }} {{ func.name }}({% for param in func.params %}{{ param.type }} {{ param.name }}{% if not loop.last %}, {% endif %}{% endfor %}) = 0;
+    {% endfor %}
+    {% endif %}
 }; 
