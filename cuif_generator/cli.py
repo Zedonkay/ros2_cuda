@@ -7,6 +7,8 @@ import time
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from .generator import CudaFileGenerator
+from .validator import CuifValidator
+from .profiler import CuifProfiler
 
 class CuifFileHandler(FileSystemEventHandler):
     def __init__(self, cuif_path, dev_dir):
@@ -39,17 +41,70 @@ class CuifFileHandler(FileSystemEventHandler):
         with open(cu_path, 'w') as f:
             f.write(code)
 
+def validate_cuif(cuif_path: Path, verbose: bool = False) -> bool:
+    """Validate a CUIF file."""
+    with open(cuif_path, 'r') as f:
+        content = f.read()
+    
+    validator = CuifValidator(content)
+    results = validator.validate()
+    
+    if verbose:
+        print("\nValidation Results:")
+        if results['errors']:
+            print("\nErrors:")
+            for error in results['errors']:
+                print(f"  Line {error.line}: {error.message}")
+        if results['warnings']:
+            print("\nWarnings:")
+            for warning in results['warnings']:
+                print(f"  Line {warning.line}: {warning.message}")
+    
+    return len(results['errors']) == 0
+
+def profile_cuif(cuif_path: Path, verbose: bool = False) -> None:
+    """Profile a CUIF file."""
+    with open(cuif_path, 'r') as f:
+        content = f.read()
+    
+    profiler = CuifProfiler(content)
+    kernels = profiler.find_kernels()
+    
+    if verbose:
+        print(f"\nFound {len(kernels)} kernels:")
+        for kernel in kernels:
+            print(f"  - {kernel}")
+    
+    for kernel in kernels:
+        profiler.profile_kernel(kernel)
+    
+    print(profiler.get_profile_report())
+
 def main():
     parser = argparse.ArgumentParser(description='Generate CUDA files from CUIF specification')
     parser.add_argument('input_file', help='Input CUIF file')
     parser.add_argument('-o', '--output-dir', default='.', help='Output directory')
     parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose output')
     parser.add_argument('-d', '--dev', action='store_true', help='Enable development mode with file watching')
+    parser.add_argument('--validate', action='store_true', help='Validate CUIF file before generation')
+    parser.add_argument('--profile', action='store_true', help='Profile CUDA kernels')
     args = parser.parse_args()
 
     input_file = Path(args.input_file)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Validate if requested
+    if args.validate:
+        if not validate_cuif(input_file, args.verbose):
+            print("Validation failed. Fix errors before generating files.")
+            sys.exit(1)
+
+    # Profile if requested
+    if args.profile:
+        profile_cuif(input_file, args.verbose)
+        if not args.dev and not args.validate:
+            return
 
     if args.dev:
         # Development mode: Watch .cuif file and maintain a .cu file
