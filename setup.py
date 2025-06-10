@@ -7,6 +7,7 @@ setup(
     install_requires=[
         "jinja2",
         "pyyaml",
+        "watchdog",
     ],
     entry_points={
         'console_scripts': [

@@ -1,0 +1,37 @@
+#include "{{ header }}"
+#include "{{ cuda_header }}"
+
+{% for include in includes %}
+#include {{ include }}
+{% endfor %}
+
+namespace {{ namespace|replace('::', ' { namespace ') }} {
+
+// Device functions
+{% for func in cuda_impl.device_functions %}
+/**
+ * @brief {{ func.doc }}
+ */
+{{ func.signature }} {
+    {{ func.body|default('// TODO: implement device function') }}
+}
+{% endfor %}
+
+// Kernels
+{% for kernel in cuda_impl.kernels %}
+/**
+ * @brief {{ kernel.doc }}
+ */
+{{ kernel.signature }} {
+    {{ kernel.body|default('// TODO: implement kernel') }}
+}
+{% endfor %}
+
+// Implementation of class methods
+{% for impl in cuda_impl.method_impls %}
+{{ impl.signature }} {
+    {{ impl.body|default('// TODO: implement method') }}
+}
+{% endfor %}
+
+} // namespace {{ namespace.split('::')[0] }} {% for ns in namespace.split('::')[1:] %} } // namespace {{ ns }} {% endfor %} 

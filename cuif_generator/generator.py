@@ -2,6 +2,7 @@ import yaml
 import jinja2
 from pathlib import Path
 import pkg_resources
+import re
 
 class CudaFileGenerator:
     def __init__(self, input_file, output_dir, verbose=False):
@@ -16,40 +17,49 @@ class CudaFileGenerator:
         )
 
     def parse_cuif(self):
-        """Parse the CUIF file and return the configuration."""
+        """Parse the ultra-minimal CUIF file: YAML header, then verbatim CUDA/C++ code."""
         with open(self.input_file, 'r') as f:
             content = f.read()
-            # Add YAML document markers
-            content = '---\n' + content
-            # Parse as YAML
-            return yaml.safe_load(content)
+        # Split YAML header and code
+        if '---' in content:
+            header, code = content.split('---', 1)
+            config = yaml.safe_load(header)
+            config['verbatim_code'] = code.strip()
+        else:
+            raise ValueError("CUIF file must have a YAML header followed by '---' and code.")
+        return config
 
     def generate_files(self):
         """Generate all necessary files from the CUIF configuration."""
         config = self.parse_cuif()
-        
-        # Get the base name from the input file
         base_name = self.input_file.stem
 
-        # Generate .hpp file
-        hpp_template = self.env.get_template('header.hpp.jinja2')
-        hpp_content = hpp_template.render(**config)
+        # Generate .cu file (verbatim code with ROS2/CUDA glue)
+        cu_template = self.env.get_template('cuif_minimal.cu.jinja2')
+        cu_content = cu_template.render(**config, class_name=config.get('class'), method_name=config.get('method'))
+        cu_file = self.output_dir / f"{base_name}.cu"
+        cu_file.write_text(cu_content)
+        if self.verbose:
+            print(f"Generated {cu_file}")
+
+        # Generate .hpp and .cuh files (minimal wrappers)
+        hpp_template = self.env.get_template('cuif_minimal.hpp.jinja2')
+        hpp_content = hpp_template.render(**config, class_name=config.get('class'), method_name=config.get('method'))
         hpp_file = self.output_dir / f"{base_name}.hpp"
         hpp_file.write_text(hpp_content)
         if self.verbose:
             print(f"Generated {hpp_file}")
 
-        # Generate .cuh file
-        cuh_template = self.env.get_template('cuda_header.cuh.jinja2')
-        cuh_content = cuh_template.render(**config)
+        cuh_template = self.env.get_template('cuif_minimal.cuh.jinja2')
+        cuh_content = cuh_template.render(**config, class_name=config.get('class'), method_name=config.get('method'))
         cuh_file = self.output_dir / f"{base_name}.cuh"
         cuh_file.write_text(cuh_content)
         if self.verbose:
             print(f"Generated {cuh_file}")
 
         # Generate CMakeLists.txt
-        cmake_template = self.env.get_template('CMakeLists.txt.jinja2')
-        cmake_content = cmake_template.render(**config)
+        cmake_template = self.env.get_template('cuif_minimal.CMakeLists.txt.jinja2')
+        cmake_content = cmake_template.render(**config, base_name=base_name)
         cmake_file = self.output_dir / 'CMakeLists.txt'
         cmake_file.write_text(cmake_content)
         if self.verbose:
@@ -58,6 +68,7 @@ class CudaFileGenerator:
         if self.verbose:
             print("\nGeneration complete!")
             print(f"Generated files in {self.output_dir}:")
+            print(f"  - {cu_file.name}")
             print(f"  - {hpp_file.name}")
             print(f"  - {cuh_file.name}")
             print(f"  - {cmake_file.name}") 

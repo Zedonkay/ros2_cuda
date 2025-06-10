@@ -1,117 +1,81 @@
 # CUIF Generator
 
-A tool for generating CUDA-ROS2 integration files from CUIF (CUDA Interface) specifications.
+A development tool for generating C++/CUDA/ROS2 interface code from a single, ultra-minimal specification file (`.cuif`).
 
-## Installation
+## Ultra-Minimal Format
 
-```bash
-pip install cuif-generator
+Write CUDA code as you normally would, with a minimal YAML header at the top to specify the class and method to expose to ROS2. The rest is just your CUDA/C++ code.
+
+### Example
+
+```yaml
+class: DoublerNode
+method: double_on_gpu
+
+---
+#include <cuda_runtime.h>
+#include <iostream>
+
+// CUDA kernel
+__global__ void double_array(int* data, int n) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < n) {
+    data[idx] *= 2;
+  }
+}
+
+// Device function (optional)
+__device__ int double_value(int x) {
+  return x * 2;
+}
+
+// The method to be exposed to ROS2
+void double_on_gpu(int* device_data, int n) {
+  int threads = 256;
+  int blocks = (n + threads - 1) / threads;
+  double_array<<<blocks, threads>>>(device_data, n);
+  cudaDeviceSynchronize();
+  std::cout << "Doubled array on GPU!" << std::endl;
+}
 ```
 
 ## Usage
 
-1. Create a `.cuif` file describing your CUDA-ROS2 integration:
-
-```yaml
-# example.cuif
-namespace: my_package::cuda
-
-class: MyProcessor
-  base: rclcpp::Node
-  virtual: true
-  factory: create
-  implementation: MyProcessor_Impl
-  doc: |
-    My CUDA-accelerated processor node.
-
-  members:
-    - type: bool
-      name: m_use_gpu
-      init: true
-      public: true
-      doc: Whether to use GPU acceleration
-
-  methods:
-    - name: create
-      static: true
-      return: std::shared_ptr<MyProcessor>
-      params: const rclcpp::NodeOptions& options = rclcpp::NodeOptions()
-      doc: Creates a new processor instance
-
-# ... rest of the specification
+### Basic Usage
+```bash
+cuif-generate examples/doubler.cuif -o output_dir --verbose
 ```
 
-2. Generate the files:
+This will generate:
+- `doubler.cu` (your code, ready for ROS2 integration)
+- `doubler.hpp` (minimal class declaration)
+- `doubler.cuh` (minimal implementation header)
+- `CMakeLists.txt` (build config)
+
+### Development Mode
+For full IDE support (IntelliSense, syntax highlighting, etc.) while developing:
 
 ```bash
-cuif-generate example.cuif
+cuif-generate examples/doubler.cuif -o output_dir --dev
 ```
 
-This will create:
-- `example.hpp`: C++ header file
-- `example.cuh`: CUDA header file
-- `CMakeLists.txt`: Build configuration
+This will:
+1. Create a temporary `.cu` file in `output_dir/dev/` with your CUDA code
+2. Watch your `.cuif` file for changes
+3. Automatically update the `.cu` file when you save changes
+4. Generate final files when you press Ctrl+C
 
-## CUIF Format
+Your IDE will recognize the `.cu` file and provide full CUDA development features.
 
-The CUIF format is a YAML-like specification that describes your CUDA-ROS2 integration. Key sections:
-
-### Class Definition
-```yaml
-class: MyClass
-  base: rclcpp::Node  # Optional base class
-  virtual: true       # Whether the class is virtual
-  factory: create     # Factory method name
-  implementation: MyClass_Impl  # Implementation class name
-  doc: |             # Class documentation
-    My class description
-```
-
-### Members
-```yaml
-members:
-  - type: bool
-    name: m_use_gpu
-    init: true
-    public: true
-    doc: Member documentation
-```
-
-### Methods
-```yaml
-methods:
-  - name: my_method
-    return: void
-    params: int param1, float param2
-    virtual: true
-    doc: Method documentation
-```
-
-### Dependencies
-```yaml
-includes:
-  - <rclcpp/rclcpp.hpp>
-  - <cuda_runtime.h>
-
-cmake:
-  project: my_project
-  cuda_arch: sm_75
-  dependencies:
-    - CUDA
-    - rclcpp
-```
-
-## Examples
-
-See the `examples` directory for complete examples:
-- `image_processor.cuif`: CUDA-accelerated image processing node
-- `particle_filter.cuif`: CUDA-accelerated particle filter
-- `neural_network.cuif`: CUDA-accelerated neural network node
+## Philosophy
+- **Write CUDA code, not boilerplate.**
+- **Minimal YAML header** tells the generator what to expose to ROS2.
+- **Everything else is just your CUDA/C++ code.**
+- The generator wraps your code for ROS2 compatibility.
+- **Full IDE support** during development.
 
 ## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
+Pull requests welcome!
 
 ## License
-
-This project is licensed under the MIT License - see the LICENSE file for details. 
+MIT 

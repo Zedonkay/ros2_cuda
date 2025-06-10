@@ -1,0 +1,77 @@
+class: ThrustAdvancedNode
+method: process_with_thrust
+
+---
+#include <thrust/device_vector.h>
+#include <thrust/sort.h>
+#include <thrust/reduce.h>
+#include <thrust/transform.h>
+#include <thrust/execution_policy.h>
+#include <thrust/functional.h>
+#include <iostream>
+
+// Functor for doubling
+struct doubler {
+    __host__ __device__
+    int operator()(const int& x) const {
+        return x * 2;
+    }
+};
+
+// Functor for filtering (keep only even numbers)
+struct is_even {
+    __host__ __device__
+    bool operator()(const int& x) const {
+        return (x % 2) == 0;
+    }
+};
+
+// CUDA kernel for additional processing (e.g., squaring)
+__global__ void square_kernel(int* data, int n) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n) {
+        data[idx] = data[idx] * data[idx];
+    }
+}
+
+// The method to be exposed to ROS2
+void process_with_thrust(int* device_data, int n) {
+    thrust::device_ptr<int> dev_ptr(device_data);
+
+    // Sort the data
+    thrust::sort(thrust::device, dev_ptr, dev_ptr + n);
+
+    // Filter to keep only even numbers
+    thrust::device_vector<int> filtered(n);
+    auto new_end = thrust::copy_if(
+        thrust::device,
+        dev_ptr, dev_ptr + n,
+        filtered.begin(),
+        is_even()
+    );
+    int filtered_size = new_end - filtered.begin();
+
+    // Double the filtered data
+    thrust::transform(
+        thrust::device,
+        filtered.begin(), filtered.begin() + filtered_size,
+        filtered.begin(),
+        doubler()
+    );
+
+    // Sum the filtered data
+    int sum = thrust::reduce(
+        thrust::device,
+        filtered.begin(), filtered.begin() + filtered_size,
+        0,
+        thrust::plus<int>()
+    );
+
+    // Launch a kernel to square the filtered data
+    int threads = 256;
+    int blocks = (filtered_size + threads - 1) / threads;
+    square_kernel<<<blocks, threads>>>(thrust::raw_pointer_cast(filtered.data()), filtered_size);
+    cudaDeviceSynchronize();
+
+    std::cout << "Processed data with Thrust and CUDA. Sum of filtered data: " << sum << std::endl;
+} 
