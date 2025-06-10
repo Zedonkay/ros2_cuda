@@ -1,6 +1,15 @@
 # CUIF Generator
 
-A development tool for generating C++/CUDA/ROS2 interface code from a single, ultra-minimal specification file (`.cuif`).
+A development tool for generating C++/CUDA/ROS2 interface code from a single, ultra-minimal specification file (`.cuif`). This tool simplifies the integration of GPU-accelerated logic into ROS2 nodes by providing a streamlined development workflow with built-in validation and profiling capabilities.
+
+## Features
+
+- **Ultra-Minimal Format**: Write CUDA code as you normally would, with a minimal YAML header
+- **Code Generation**: Automatically generates C++/CUDA/ROS2 interface files
+- **Development Mode**: Full IDE support with live file watching
+- **Code Validation**: Built-in static analysis for CUDA code
+- **Performance Profiling**: Kernel timing and memory usage analysis
+- **ROS2 Integration**: Seamless integration with ROS2 nodes
 
 ## Ultra-Minimal Format
 
@@ -37,6 +46,12 @@ void double_on_gpu(int* device_data, int n) {
   cudaDeviceSynchronize();
   std::cout << "Doubled array on GPU!" << std::endl;
 }
+```
+
+## Installation
+
+```bash
+pip install cuif-generator
 ```
 
 ## Usage
@@ -94,6 +109,29 @@ The profiler provides:
 - Grid and block size analysis
 - Performance recommendations
 
+## Project Structure
+
+```
+cuif_generator/
+├── __init__.py
+├── cli.py           # Command-line interface
+├── generator.py     # Core code generation logic
+├── validator.py     # CUDA code validation
+├── profiler.py      # Performance profiling
+└── templates/       # Code generation templates
+    └── cuda_impl.cu.jinja2
+
+examples/
+├── README.md
+├── doubler.cuif     # Basic example
+└── thrust_advanced.cuif  # Advanced example
+
+tests/
+├── test_generator.py
+├── test_validator.py
+└── test_profiler.py
+```
+
 ## Philosophy
 - **Write CUDA code, not boilerplate.**
 - **Minimal YAML header** tells the generator what to expose to ROS2.
@@ -103,8 +141,25 @@ The profiler provides:
 - **Built-in validation** ensures code quality.
 - **Performance profiling** helps optimize your CUDA kernels.
 
+## Roadmap
+
+### Current Features
+- ✅ Basic code generation
+- ✅ Development mode with file watching
+- ✅ Code validation
+- ✅ Performance profiling
+
+### Planned Features
+- [ ] Web interface for visualization
+- [ ] Advanced memory analysis
+- [ ] Kernel optimization suggestions
+- [ ] ROS2 message type integration
+- [ ] Multi-GPU support
+- [ ] Automated testing framework
+- [ ] Documentation generator
+
 ## Contributing
-Pull requests welcome!
+Pull requests welcome! Please read our [Contributing Guidelines](CONTRIBUTING.md) for details on our code of conduct and the process for submitting pull requests.
 
 ## License
 MIT 
