@@ -67,12 +67,41 @@ This will:
 
 Your IDE will recognize the `.cu` file and provide full CUDA development features.
 
+### Code Validation
+Validate your CUDA code for common issues and best practices:
+
+```bash
+cuif-generate examples/doubler.cuif --validate --verbose
+```
+
+The validator checks for:
+- Memory management issues
+- Kernel launch parameter validation
+- Device function usage
+- Common CUDA programming errors
+- Best practices compliance
+
+### Performance Profiling
+Profile your CUDA kernels to analyze performance:
+
+```bash
+cuif-generate examples/doubler.cuif --profile --verbose
+```
+
+The profiler provides:
+- Kernel execution time
+- Memory usage statistics
+- Grid and block size analysis
+- Performance recommendations
+
 ## Philosophy
 - **Write CUDA code, not boilerplate.**
 - **Minimal YAML header** tells the generator what to expose to ROS2.
 - **Everything else is just your CUDA/C++ code.**
 - The generator wraps your code for ROS2 compatibility.
 - **Full IDE support** during development.
+- **Built-in validation** ensures code quality.
+- **Performance profiling** helps optimize your CUDA kernels.
 
 ## Contributing
 Pull requests welcome!
