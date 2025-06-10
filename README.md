@@ -1,165 +1,220 @@
-# CUIF Generator
+# CUIF Generator for ROS2 CUDA Integration
 
-A development tool for generating C++/CUDA/ROS2 interface code from a single, ultra-minimal specification file (`.cuif`). This tool simplifies the integration of GPU-accelerated logic into ROS2 nodes by providing a streamlined development workflow with built-in validation and profiling capabilities.
+A tool for generating CUDA-accelerated ROS2 nodes from CUIF (CUDA Interface) files. This tool simplifies the development of GPU-accelerated robotics applications by providing a structured way to define CUDA kernels and device functions.
 
 ## Features
 
-- **Ultra-Minimal Format**: Write CUDA code as you normally would, with a minimal YAML header
-- **Code Generation**: Automatically generates C++/CUDA/ROS2 interface files
-- **Development Mode**: Full IDE support with live file watching
-- **Code Validation**: Built-in static analysis for CUDA code
-- **Performance Profiling**: Kernel timing and memory usage analysis
-- **ROS2 Integration**: Seamless integration with ROS2 nodes
-
-## Ultra-Minimal Format
-
-Write CUDA code as you normally would, with a minimal YAML header at the top to specify the class and method to expose to ROS2. The rest is just your CUDA/C++ code.
-
-### Example
-
-```yaml
-class: DoublerNode
-method: double_on_gpu
-
----
-#include <cuda_runtime.h>
-#include <iostream>
-
-// CUDA kernel
-__global__ void double_array(int* data, int n) {
-  int idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (idx < n) {
-    data[idx] *= 2;
-  }
-}
-
-// Device function (optional)
-__device__ int double_value(int x) {
-  return x * 2;
-}
-
-// The method to be exposed to ROS2
-void double_on_gpu(int* device_data, int n) {
-  int threads = 256;
-  int blocks = (n + threads - 1) / threads;
-  double_array<<<blocks, threads>>>(device_data, n);
-  cudaDeviceSynchronize();
-  std::cout << "Doubled array on GPU!" << std::endl;
-}
-```
+- CUDA kernel and device function generation
+- ROS2 node integration with clean interface separation
+- Automatic generation of:
+  - C++ headers (.hpp) with pure virtual interfaces
+  - CUDA headers (.cuh) with device/global function implementations
+  - CUDA source files (.cu) with kernel implementations
+- Static analysis and validation
+- Performance profiling
+- Multiple controller implementations:
+  - MPPI (Model Predictive Path Integral)
+  - PID (Proportional-Integral-Derivative)
+  - LQR (Linear Quadratic Regulator)
+  - MPC (Model Predictive Control)
+  - RRT (Rapidly-exploring Random Tree)
+  - Trajectory Follower
 
 ## Installation
 
+1. Clone the repository:
 ```bash
-pip install cuif-generator
+git clone https://github.com/yourusername/ros2_cuda.git
+cd ros2_cuda
+```
+
+2. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+3. Build the CUDA code:
+```bash
+mkdir build && cd build
+cmake ..
+make
 ```
 
 ## Usage
 
 ### Basic Usage
+
+Generate CUDA files from a CUIF file:
 ```bash
-cuif-generate examples/doubler.cuif -o output_dir --verbose
+python -m cuif_generator.cli --input path/to/file.cuif --output path/to/output/dir
 ```
 
-This will generate:
-- `doubler.cu` (your code, ready for ROS2 integration)
-- `doubler.hpp` (minimal class declaration)
-- `doubler.cuh` (minimal implementation header)
-- `CMakeLists.txt` (build config)
+### Command Line Options
 
-### Development Mode
-For full IDE support (IntelliSense, syntax highlighting, etc.) while developing:
+- `--input`: Path to input CUIF file (required)
+- `--output`: Path to output directory (required)
+- `--validate`: Enable static analysis and validation
+- `--profile`: Enable performance profiling
+- `--verbose`: Enable verbose output
 
+### CUIF File Format
+
+CUIF files use a YAML-like syntax to define CUDA-accelerated ROS2 nodes. Here's an example:
+
+```yaml
+class: MyNode
+method: compute_control
+includes:
+  - <cuda_runtime.h>
+  - <thrust/device_vector.h>
+  - <vector>
+
+---
+// Constants
+constexpr int DOF = 6;
+constexpr float PI = 3.14159f;
+
+// Data structures
+struct JointState {
+    float position;
+    float velocity;
+};
+
+// CUDA-specific constants
+__constant__ float MAX_VELOCITY = 1.0f;
+
+// CUDA-specific structs
+__device__ struct DeviceState {
+    float* positions;
+    float* velocities;
+};
+
+// Device functions
+__device__ float compute_error(float target, float current) {
+    return target - current;
+}
+
+// Kernels
+__global__ void update_state(DeviceState state, float dt) {
+    // Implementation
+}
+
+// Methods
+void compute_control(const JointState& current, JointState& target) {
+    // Implementation
+}
+```
+
+### Generated Files
+
+The generator creates three main files:
+
+1. **`.hpp` file:**
+   - Contains all constants and data structures
+   - Defines pure virtual methods for ROS2 interface
+   - Includes abstract interfaces for device/global functions
+
+2. **`.cuh` file:**
+   - Contains CUDA-specific constants and structs
+   - Implements device functions and kernels
+   - Provides CUDA implementations of ROS2 methods
+
+3. **`.cu` file:**
+   - Contains the actual CUDA code
+   - Implements kernels and device functions
+   - Provides ROS2/CUDA integration code
+
+### Controller Examples
+
+#### MPPI Controller
+The MPPI controller implements Model Predictive Path Integral control with parallel trajectory sampling and optimization. Key features:
+- Parallel trajectory sampling
+- Cost computation using Thrust
+- Efficient control updates
+
+#### PID Controller
+The PID controller implements parallel PID control for multiple joints. Key features:
+- Anti-windup protection
+- Parallel joint control
+- Efficient integral updates
+
+#### LQR Controller
+The LQR controller implements Linear Quadratic Regulator with parallel state feedback. Key features:
+- Matrix-vector multiplication
+- Parallel state feedback
+- Efficient gain computation
+
+#### MPC Controller
+The MPC controller implements Model Predictive Control with parallel gradient descent optimization. Key features:
+- Parallel trajectory optimization
+- Efficient gradient computation
+- Constraint handling
+
+#### RRT Planner
+The RRT planner implements Rapidly-exploring Random Tree planning with parallel tree construction. Key features:
+- Parallel tree expansion
+- Efficient nearest neighbor search
+- Collision checking
+
+#### Trajectory Follower
+The trajectory follower implements trajectory following with lookahead and parallel control computation. Key features:
+- Lookahead state computation
+- Parallel control computation
+- Efficient interpolation
+
+## Development
+
+### Project Structure
+
+```
+ros2_cuda/
+├── cuif_generator/
+│   ├── cli.py
+│   ├── generator.py
+│   ├── validator.py
+│   ├── profiler.py
+│   └── templates/
+│       ├── cuif_minimal.hpp.jinja2
+│       ├── cuif_minimal.cuh.jinja2
+│       └── cuif_minimal.cu.jinja2
+├── examples/
+│   ├── mppi/
+│   ├── pid/
+│   ├── lqr/
+│   ├── mpc/
+│   ├── rrt/
+│   ├── trajectory_follower/
+│   └── robot_control.cuif
+├── tests/
+│   ├── test_generator.py
+│   ├── test_validator.py
+│   └── test_profiler.py
+└── README.md
+```
+
+### Adding New Controllers
+
+1. Create a new CUIF file in the `examples` directory
+2. Define the controller class and method
+3. Implement device functions and kernels
+4. Add validation and profiling support
+5. Update documentation
+
+### Testing
+
+Run tests:
 ```bash
-cuif-generate examples/doubler.cuif -o output_dir --dev
+python -m pytest tests/
 ```
 
-This will:
-1. Create a temporary `.cu` file in `output_dir/dev/` with your CUDA code
-2. Watch your `.cuif` file for changes
-3. Automatically update the `.cu` file when you save changes
-4. Generate final files when you press Ctrl+C
+### Contributing
 
-Your IDE will recognize the `.cu` file and provide full CUDA development features.
-
-### Code Validation
-Validate your CUDA code for common issues and best practices:
-
-```bash
-cuif-generate examples/doubler.cuif --validate --verbose
-```
-
-The validator checks for:
-- Memory management issues
-- Kernel launch parameter validation
-- Device function usage
-- Common CUDA programming errors
-- Best practices compliance
-
-### Performance Profiling
-Profile your CUDA kernels to analyze performance:
-
-```bash
-cuif-generate examples/doubler.cuif --profile --verbose
-```
-
-The profiler provides:
-- Kernel execution time
-- Memory usage statistics
-- Grid and block size analysis
-- Performance recommendations
-
-## Project Structure
-
-```
-cuif_generator/
-├── __init__.py
-├── cli.py           # Command-line interface
-├── generator.py     # Core code generation logic
-├── validator.py     # CUDA code validation
-├── profiler.py      # Performance profiling
-└── templates/       # Code generation templates
-    └── cuda_impl.cu.jinja2
-
-examples/
-├── README.md
-├── doubler.cuif     # Basic example
-└── thrust_advanced.cuif  # Advanced example
-
-tests/
-├── test_generator.py
-├── test_validator.py
-└── test_profiler.py
-```
-
-## Philosophy
-- **Write CUDA code, not boilerplate.**
-- **Minimal YAML header** tells the generator what to expose to ROS2.
-- **Everything else is just your CUDA/C++ code.**
-- The generator wraps your code for ROS2 compatibility.
-- **Full IDE support** during development.
-- **Built-in validation** ensures code quality.
-- **Performance profiling** helps optimize your CUDA kernels.
-
-## Roadmap
-
-### Current Features
-- ✅ Basic code generation
-- ✅ Development mode with file watching
-- ✅ Code validation
-- ✅ Performance profiling
-
-### Planned Features
-- [ ] Web interface for visualization
-- [ ] Advanced memory analysis
-- [ ] Kernel optimization suggestions
-- [ ] ROS2 message type integration
-- [ ] Multi-GPU support
-- [ ] Automated testing framework
-- [ ] Documentation generator
-
-## Contributing
-Pull requests welcome! Please read our [Contributing Guidelines](CONTRIBUTING.md) for details on our code of conduct and the process for submitting pull requests.
+1. Fork the repository
+2. Create a feature branch
+3. Make changes
+4. Run tests
+5. Submit a pull request
 
 ## License
-MIT 
+
+This project is licensed under the MIT License - see the LICENSE file for details. 
