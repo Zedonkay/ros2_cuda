@@ -1,5 +1,7 @@
 # CUIF Generator for ROS2 CUDA Integration
 
+**⚠️ This is version 1 of the project and has been abandoned. The new and improved version is available at: [robodsl](https://github.com/Zedonkay/robodsl)**
+
 A tool for generating CUDA-accelerated ROS2 nodes from CUIF (CUDA Interface) files. This tool simplifies the development of GPU-accelerated robotics applications by providing a structured way to define CUDA kernels and device functions.
 
 ## Features
@@ -7,9 +9,10 @@ A tool for generating CUDA-accelerated ROS2 nodes from CUIF (CUDA Interface) fil
 - CUDA kernel and device function generation
 - ROS2 node integration with clean interface separation
 - Automatic generation of:
-  - C++ headers (.hpp) with pure virtual interfaces
-  - CUDA headers (.cuh) with device/global function implementations
-  - CUDA source files (.cu) with kernel implementations
+  - C++ headers (.hpp) with pure virtual interfaces, all constants, and all data structures
+  - CUDA headers (.cuh) with device/global function declarations and CUDA-specific structs/constants
+  - CUDA source files (.cu) with kernel and device function implementations
+- Robust parsing of structs, functions, and globals (constants)
 - Static analysis and validation
 - Performance profiling
 - Multiple controller implementations:
@@ -44,32 +47,30 @@ make
 
 ### Basic Usage
 
-Generate CUDA files from a CUIF file:
+Generate CUDA files from one or more CUIF files:
 ```bash
-python -m cuif_generator.cli --input path/to/file.cuif --output path/to/output/dir
+python -m cuif_generator.cli examples/robot_control.cuif -o output/robot_control
+python -m cuif_generator.cli examples/*.cuif -o output/all_controllers
 ```
 
 ### Command Line Options
 
-- `--input`: Path to input CUIF file (required)
-- `--output`: Path to output directory (required)
-- `--validate`: Enable static analysis and validation
-- `--profile`: Enable performance profiling
-- `--verbose`: Enable verbose output
+- `input_files` (positional): One or more CUIF files or glob patterns to process
+- `-o`, `--output-dir`: Output directory for generated files (required)
+- `-v`, `--verbose`: Enable verbose output showing generated files
+- `-d`, `--debug`: Enable debug output showing parsed structs, constants, and methods
+- `-h`, `--help`: Show help message and usage examples
+
+#### Example:
+```bash
+python -m cuif_generator.cli examples/robot_control.cuif -o output/robot_control -v -d
+```
 
 ### CUIF File Format
 
-CUIF files use a YAML-like syntax to define CUDA-accelerated ROS2 nodes. Here's an example:
+CUIF files use a C++-like syntax to define CUDA-accelerated ROS2 nodes. Example:
 
-```yaml
-class: MyNode
-method: compute_control
-includes:
-  - <cuda_runtime.h>
-  - <thrust/device_vector.h>
-  - <vector>
-
----
+```cpp
 // Constants
 constexpr int DOF = 6;
 constexpr float PI = 3.14159f;
@@ -90,39 +91,41 @@ __device__ struct DeviceState {
 };
 
 // Device functions
-__device__ float compute_error(float target, float current) {
-    return target - current;
-}
+__device__ float compute_error(float target, float current);
 
 // Kernels
-__global__ void update_state(DeviceState state, float dt) {
-    // Implementation
-}
+__global__ void update_state(DeviceState state, float dt);
 
 // Methods
-void compute_control(const JointState& current, JointState& target) {
-    // Implementation
-}
+void compute_control(const JointState& current, JointState& target);
 ```
 
 ### Generated Files
 
-The generator creates three main files:
+The generator creates the following files for each CUIF specification:
 
 1. **`.hpp` file:**
-   - Contains all constants and data structures
-   - Defines pure virtual methods for ROS2 interface
+   - Contains all constants and regular data structures
+   - Defines pure virtual methods for the ROS2 interface
    - Includes abstract interfaces for device/global functions
 
 2. **`.cuh` file:**
    - Contains CUDA-specific constants and structs
-   - Implements device functions and kernels
-   - Provides CUDA implementations of ROS2 methods
+   - Declares device functions and kernels
+   - Provides CUDA implementation class
 
 3. **`.cu` file:**
    - Contains the actual CUDA code
    - Implements kernels and device functions
    - Provides ROS2/CUDA integration code
+
+4. **CMakeLists.txt:**
+   - Build configuration for the generated files
+
+### Debug and Help
+
+- Use `-d` or `--debug` to print parsed structs, constants, and methods for troubleshooting.
+- Use `-h` or `--help` to see all CLI options, usage examples, and CUIF file format documentation.
 
 ### Controller Examples
 
@@ -172,7 +175,6 @@ ros2_cuda/
 │   ├── cli.py
 │   ├── generator.py
 │   ├── validator.py
-│   ├── profiler.py
 │   └── templates/
 │       ├── cuif_minimal.hpp.jinja2
 │       ├── cuif_minimal.cuh.jinja2
@@ -188,7 +190,6 @@ ros2_cuda/
 ├── tests/
 │   ├── test_generator.py
 │   ├── test_validator.py
-│   └── test_profiler.py
 └── README.md
 ```
 
@@ -198,22 +199,6 @@ ros2_cuda/
 2. Define the controller class and method
 3. Implement device functions and kernels
 4. Add validation and profiling support
-5. Update documentation
-
-### Testing
-
-Run tests:
-```bash
-python -m pytest tests/
-```
-
-### Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make changes
-4. Run tests
-5. Submit a pull request
 
 ## License
 
