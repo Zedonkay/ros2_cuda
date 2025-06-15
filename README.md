@@ -1,6 +1,6 @@
 # CUIF Generator for ROS2 CUDA Integration
 
-**⚠️ DEPRECATED: This is version 1 of the project and is not fully functional. Development has been abandoned in favor of the new and improved version: [robodsl](https://github.com/Zedonkay/robodsl). This repository is kept for historical reference only.**
+**DEPRECATED: This is version 1 of the project and is not fully functional. Development has been abandoned in favor of the new and improved version: [robodsl](https://github.com/Zedonkay/robodsl). This repository is kept for historical reference only.**
 
 A tool for generating CUDA-accelerated ROS2 nodes from CUIF (CUDA Interface) files. This tool simplifies the development of GPU-accelerated robotics applications by providing a structured way to define CUDA kernels and device functions.
 
